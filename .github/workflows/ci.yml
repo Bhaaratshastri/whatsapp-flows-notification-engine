@@ -1,0 +1,80 @@
+---
+
+### `.github/workflows/ci.yml`
+
+> **Note:** On a brand-new SFDX project before any Apex or LWC files exist under `force-app`, `sf scanner run` can exit with a "no files found" warning/error unless `force-app` contains at least one scannable file or `.gitkeep`/placeholder, or you guard for empty directories. Once your first `.cls` or `.js` file lands (or when you seed a test file for your induced-fail validation run), `sf scanner run` scans `force-app` directly.
+
+```yaml
+name: CI Quality & Commit Gates
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  code-analyzer:
+    name: Salesforce Code Analyzer (PMD & ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Salesforce CLI & Code Analyzer Plugin
+        run: |
+          npm install -g @salesforce/cli
+          sf plugins install @salesforce/sfdx-scanner
+
+      - name: Run Salesforce Code Analyzer
+        run: |
+          sf scanner run \
+            --target "force-app" \
+            --engine "pmd,eslint-lwc" \
+            --severity-threshold 2
+
+  commit-lint:
+    name: Conventional Commits Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install commitlint
+        run: |
+          npm install --no-save @commitlint/cli @commitlint/config-conventional
+
+      - name: Configure allowed Conventional Commit types
+        run: |
+          cat << 'EOF' > commitlint.config.cjs
+          module.exports = {
+            extends: ['@commitlint/config-conventional'],
+            rules: {
+              'type-enum': [2, 'always', ['feat', 'fix', 'chore', 'test', 'docs']]
+            }
+          };
+          EOF
+
+      - name: Validate PR commit messages
+        run: |
+          npx commitlint \
+            --config commitlint.config.cjs \
+            --from ${{ github.event.pull_request.base.sha }} \
+            --to ${{ github.event.pull_request.head.sha }} \
+            --verbose
